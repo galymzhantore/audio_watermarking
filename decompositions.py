@@ -163,3 +163,79 @@ def extract_Schur(M, D=0.01, C=1):
         results.append(extracted_bit)
     
     return torch.tensor(results).long()
+
+
+def embed_Cholesky(M, bits, D=0.01, C=1):
+    if not torch.is_tensor(M):
+        M = torch.from_numpy(M).float()
+    
+    if M.dim() == 2:
+        M = M.unsqueeze(0)
+        bits = torch.tensor([bits]) if not torch.is_tensor(bits) else bits.unsqueeze(0)
+    
+    batch_size = M.shape[0]
+    results = []
+    
+    for i in range(batch_size):
+        # Make positive-definite: A = M @ M.T
+        A = M[i] @ M[i].T
+        A = A + torch.eye(A.shape[0]) * 1e-6
+
+        L = torch.linalg.cholesky(A)
+        
+        diag_L = torch.diag(L)
+        idx = torch.argmax(torch.abs(diag_L))
+        
+        L_max = L[idx, idx]
+        Y_i = torch.round(L_max / D)
+        M_param = 2 * C
+        
+        if bits[i].item() == 1:
+            Y_i_prime = Y_i + C - (Y_i % M_param)
+        else:
+            Y_i_prime = Y_i + C - ((Y_i + C) % M_param)
+        
+        # Modify L
+        L_prime = L.clone()
+        L_prime[idx, idx] = Y_i_prime * D
+        
+        A_prime = L_prime @ L_prime.T
+        
+        # Recover M' using: M' = A'^{1/2} @ (A^{-1/2} @ M)
+        scale = torch.sqrt(A_prime[idx, idx] / A[idx, idx])
+        M_prime = M[i].clone()
+        M_prime[idx, :] = M_prime[idx, :] * scale
+        
+        results.append(M_prime)
+    
+    result = torch.stack(results)
+    return result.squeeze() if result.shape[0] == 1 else result
+
+
+def extract_Cholesky(M, D=0.01, C=1):
+    if not torch.is_tensor(M):
+        M = torch.from_numpy(M).float()
+    
+    if M.dim() == 2:
+        M = M.unsqueeze(0)
+    
+    batch_size = M.shape[0]
+    extracted_bits = []
+    
+    for i in range(batch_size):
+        A = M[i] @ M[i].T
+        A = A + torch.eye(A.shape[0]) * 1e-6
+        
+        L = torch.linalg.cholesky(A)
+        
+        diag_L = torch.diag(L)
+        idx = torch.argmax(torch.abs(diag_L))
+        
+        L_max = L[idx, idx]
+        Y_i_star = torch.round(L_max / D)
+        M_param = 2 * C
+        extracted_bit = 1 if (Y_i_star % M_param).item() == 1 else 0
+        extracted_bits.append(extracted_bit)
+    
+    result = torch.tensor(extracted_bits, dtype=torch.long)
+    return result.squeeze() if len(result) == 1 else result
