@@ -239,3 +239,87 @@ def extract_Cholesky(M, D=0.01, C=1):
     
     result = torch.tensor(extracted_bits, dtype=torch.long)
     return result.squeeze() if len(result) == 1 else result
+
+
+
+def embed_LU(M, bits, D=0.01, C=1):
+    # Приводим к numpy, так как используем scipy.linalg
+    if torch.is_tensor(M):
+        M_np = M.cpu().numpy()
+        # Если биты - это тензор, приводим к numpy или списку для удобного доступа
+        if torch.is_tensor(bits):
+             bits = bits.cpu().numpy()
+    else:
+        M_np = M
+        
+    # Обработка одиночной матрицы (не батча)
+    if M_np.ndim == 2:
+        M_np = M_np[np.newaxis, ...]
+        bits = [bits] if np.isscalar(bits) else bits
+
+    batch_size = M_np.shape[0]
+    results = []
+    
+    for i in range(batch_size):
+        # 1. Разложение A = P * L * U
+        # scipy.linalg.lu возвращает P (матрица перестановок), L, U
+        P, L, U = lu(M_np[i])
+        
+        # 2. Ищем самый большой коэффициент в матрице U (обычно на диагонали)
+        # Это повышает устойчивость (robustness)
+        idx = np.unravel_index(np.argmax(np.abs(U)), U.shape)
+        val = U[idx]
+        
+        # 3. Квантование (QIM)
+        Y_i = np.round(val / D)
+        M_param = 2 * C
+        
+        # Логика внедрения (аналогично твоим QR/Schur)
+        # Если бит 1 -> остаток должен быть C
+        # Если бит 0 -> остаток должен быть 0
+        current_bit = bits[i].item() if hasattr(bits[i], 'item') else bits[i]
+        
+        if current_bit == 1:
+            Y_i_prime = Y_i + C - (Y_i % M_param)
+        else:
+            Y_i_prime = Y_i + C - ((Y_i + C) % M_param)
+            
+        U_prime = U.copy()
+        U_prime[idx] = Y_i_prime * D
+        
+        # 4. Обратная сборка: P @ L @ U_prime
+        results.append(P @ L @ U_prime)
+        
+    result = torch.from_numpy(np.stack(results)).float()
+    return result.squeeze() if result.shape[0] == 1 else result
+
+def extract_LU(M, D=0.01, C=1):
+    if torch.is_tensor(M):
+        M_np = M.cpu().numpy()
+    else:
+        M_np = M
+
+    if M_np.ndim == 2:
+        M_np = M_np[np.newaxis, ...]
+
+    batch_size = M_np.shape[0]
+    results = []
+    
+    for i in range(batch_size):
+        # 1. Разложение
+        _, _, U = lu(M_np[i])
+        
+        # 2. Поиск того же коэффициента
+        idx = np.unravel_index(np.argmax(np.abs(U)), U.shape)
+        val = U[idx]
+        
+        # 3. Извлечение бита из остатка
+        Y_i_star = np.round(val / D)
+        M_param = 2 * C
+        
+        # Если остаток C (например, 1 при C=1) -> это бит 1
+        # Если остаток 0 -> это бит 0
+        extracted_bit = 1 if (Y_i_star % M_param) == C else 0
+        results.append(extracted_bit)
+        
+    return torch.tensor(results, dtype=torch.long)
