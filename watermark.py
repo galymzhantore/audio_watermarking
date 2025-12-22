@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import warnings
 
-from decompositions import embed_SVD, embed_QR, embed_Schur, extract_SVD, extract_QR, extract_Schur
+from decompositions import embed_SVD, embed_QR, embed_Schur, extract_SVD, extract_QR, extract_Schur, embed_Cholesky, extract_Cholesky, embed_LU, extract_LU
 from LWT_FWHT import BatchLWT, BatchFWHT
 from preprocessing import encrypt_watermark, decrypt_watermark
 
@@ -39,6 +39,12 @@ class Watermark():
         elif decomposition_type == 'Schur':
             self.embedder = embed_Schur
             self.extractor = extract_Schur
+        elif decomposition_type == 'Cholesky':
+            self.embedder = embed_Cholesky
+            self.extractor = extract_Cholesky
+        elif decomposition_type == 'LU':
+            self.embedder = embed_LU
+            self.extractor = extract_LU
         else:
             raise ValueError(f"Unsupported decomposition type: {decomposition_type}")
             
