@@ -55,9 +55,15 @@ DATASETS = {
     
     # === МУЗЫКА (Music) ===
     'gtzan': {
-        'url': 'https://huggingface.co/datasets/marsyas/gtzan/resolve/main/data/genres.tar.gz',
+        'urls': [
+            # Primary: HuggingFace mirror (most reliable)
+            'https://huggingface.co/datasets/marsyas/gtzan/resolve/main/data/genres.tar.gz',
+            # Fallback 1: Alternative HuggingFace path
+            'https://huggingface.co/datasets/marsyas/gtzan/resolve/main/genres.tar.gz',
+        ],
+        'url': 'https://huggingface.co/datasets/marsyas/gtzan/resolve/main/data/genres.tar.gz',  # Primary for compatibility
         'archive': 'gtzan_genres.tar.gz',
-        'extract_dir': 'gtzan_genres',
+        'extract_dir': 'genres',  # The tar.gz extracts to 'genres' folder
         'description': 'GTZAN - 10 жанров музыки: blues, classical, country, disco, hiphop, jazz, metal, pop, reggae, rock',
         'compression': 'gz',
         'category': 'music'
@@ -102,8 +108,8 @@ MANUAL_DATASETS = {
 }
 
 
-def download_file(url, dest_path, chunk_size=8192):
-    """Download a file with progress bar."""
+def download_file(url, dest_path, chunk_size=8192, timeout=30, max_retries=3):
+    """Download a file with progress bar, timeout and retry support."""
     dest_path = Path(dest_path)
     if dest_path.exists():
         print(f"  ✓ Already downloaded: {dest_path.name}")
@@ -111,15 +117,35 @@ def download_file(url, dest_path, chunk_size=8192):
     
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     
-    print(f"  Downloading {dest_path.name}...")
-    response = requests.get(url, stream=True)
-    total_size = int(response.headers.get('content-length', 0))
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    }
     
-    with open(dest_path, 'wb') as f:
-        with tqdm(total=total_size, unit='B', unit_scale=True, desc="  Progress") as pbar:
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                f.write(chunk)
-                pbar.update(len(chunk))
+    for attempt in range(max_retries):
+        try:
+            print(f"  Downloading {dest_path.name}... (attempt {attempt + 1}/{max_retries})")
+            response = requests.get(url, stream=True, headers=headers, timeout=timeout, allow_redirects=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(dest_path, 'wb') as f:
+                with tqdm(total=total_size, unit='B', unit_scale=True, desc="  Progress") as pbar:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        f.write(chunk)
+                        pbar.update(len(chunk))
+            
+            return dest_path
+            
+        except requests.exceptions.RequestException as e:
+            print(f"  ⚠ Attempt {attempt + 1} failed: {e}")
+            if dest_path.exists():
+                dest_path.unlink()  # Remove partial download
+            if attempt == max_retries - 1:
+                raise
+            print(f"  Retrying in 3 seconds...")
+            import time
+            time.sleep(3)
     
     return dest_path
 
@@ -161,14 +187,29 @@ def download_dataset(name):
     
     archive_path = DATA_ROOT / info['archive']
     
-    try:
-        download_file(info['url'], archive_path)
-        extract_archive(archive_path, DATA_ROOT, info['compression'])
-        print(f"  ✓ Done!")
-        return True
-    except Exception as e:
-        print(f"  ✗ Error: {e}")
-        return False
+    # Get list of URLs to try (support both 'urls' list and single 'url')
+    urls_to_try = info.get('urls', [info['url']])
+    if not urls_to_try:
+        urls_to_try = [info['url']]
+    
+    last_error = None
+    for i, url in enumerate(urls_to_try):
+        try:
+            print(f"\n  Trying source {i + 1}/{len(urls_to_try)}: {url[:60]}...")
+            download_file(url, archive_path, timeout=60)
+            extract_archive(archive_path, DATA_ROOT, info['compression'])
+            print(f"  ✓ Done!")
+            return True
+        except Exception as e:
+            last_error = e
+            print(f"  ✗ Source {i + 1} failed: {e}")
+            # Clean up partial download before trying next URL
+            if archive_path.exists():
+                archive_path.unlink()
+            continue
+    
+    print(f"\n  ✗ All sources failed! Last error: {last_error}")
+    return False
 
 
 def list_datasets():
