@@ -12,14 +12,14 @@
 
 ### Водяной знак
 
-![Водяной знак](images/watermark.png)
+![Водяной знак](demo/watermark.png)
 
 ### Аудио
 
-| | |
-|-------------------------|-------|
-| Оригинальное аудио | <audio src="demo/freddie.wav" controls></audio> |
-| Аудио с водяным знаком | <audio src="demo/watermarked_freddie.wav" controls></audio> |
+| Описание | Файл |
+|-------------------------|------|
+| Оригинальное аудио | [🎵 freddie.wav](demo/freddie.wav) |
+| Аудио с водяным знаком | [🎵 watermarked_freddie.wav](demo/watermarked_freddie.wav) |
 
 ---
 
